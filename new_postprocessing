@@ -1,0 +1,810 @@
+from xml.etree import ElementTree
+import pandas as pd
+import pickle
+import random
+import numpy as np
+import math
+
+def rt_tostring(r, t):
+    string = str(r[0][0])+' '+str(r[0][1])+' '+str(r[0][2])+' '+str(t[0][0])+' '+str(r[1][0])+' '+str(r[1][1])+' '+str(r[1][2])+' '+str(t[1][0])+' '+str(r[2][0])+' '+str(r[2][1])+' '+str(r[2][2])+' '+str(t[2][0])+' '+'0'+' '+'0'+' '+'0'+' '+'1'
+    return(string)
+    
+def get_road_ids(file):
+    ids = pd.read_csv(file)
+    road_ids = ids['Road Id'].values.tolist()
+    return(road_ids)
+road_ids = get_road_ids("road_ids.csv")
+
+def get_road_types(file):
+    with open(file, 'rb') as handle:
+        data = handle.read()
+        d = pickle.loads(data)
+        return(d)
+road_types = get_road_types("types.txt")
+
+def read_junctions(file_path):
+    root = ElementTree.parse(file_path).getroot()
+    junction = root.findall("./junction")
+    junctions=[]
+    for j in junction:
+        jun=[]
+        junction_id = j.get("id")
+        jun.append(junction_id)
+        junction_name = j.get("name")
+        jun.append(junction_name)
+        j = ElementTree.ElementTree(j)
+        connections = j.findall("connection")
+        conns = []
+        for c in connections:
+            cs = []
+            c_id = c.get("id")
+            cs.append(c_id)
+            c_incoming_road = c.get("incomingRoad")
+            cs.append(c_incoming_road)
+            c_connecting_road = c.get("connectingRoad")
+            cs.append(c_connecting_road)
+            c_contact_point = c.get("contactPoint")
+            cs.append(c_contact_point)
+            c = ElementTree.ElementTree(c)
+            ll = c.findall("laneLink")
+            ls = []
+            for l in ll:
+                
+                t = l.get("to")
+                ls.append([t])
+            cs.append(ls)
+            conns.append(cs)
+        jun.append(conns)
+        junctions.append(jun)
+    return(junctions)
+junctions = read_junctions('final2.xodr')
+
+boundary_properties = pd.read_csv("boundary_properties.csv")
+center_lanes = pd.read_csv("center_lanes.csv")
+coordinates = pd.read_csv("coordinates.csv")
+lane_boundaries = pd.read_csv("lane_boundaries.csv") #apo to geojson 
+lane_properties = pd.read_csv("lane_properties.csv") #apo to geojson
+left_lanes = pd.read_csv("left_lanes.csv")
+objects = pd.read_csv("objects.csv")
+predecessors = pd.read_csv("predecessors.csv")
+right_lanes = pd.read_csv("right_lanes.csv")
+speeds = pd.read_csv("speeds.csv")
+successors = pd.read_csv("successors.csv")
+
+successorsLanes = pd.read_csv("successorsLanes.csv")
+predecessorsLanes = pd.read_csv("predecessorsLanes.csv")
+geo = pd.read_csv("geo.csv")
+road_ids = get_road_ids("road_ids.csv")
+road_types = get_road_types("types.txt")
+
+def translate_road_type(t):
+    if(t == "town"):
+        return(4) #4-->urban sto dw
+        
+def search_indexes(value, df, column_name):
+    return(df.loc[df[column_name] == value].index.values)
+
+def point_str(x, y, z):
+    return(str(x)+' '+str(y)+' '+str(z))
+    
+def road_origin(road_id, df_left, df_right, lane_properties, coordinates):
+    origin = []
+    df = df_left
+    indexes = search_indexes(road_id, df_left, 'Road Id')
+    if(len(indexes) == 0):
+        df = df_right
+        indexes = search_indexes(int(road_id), df_right, 'Road Id')
+    for i in indexes:
+        if(df.loc[i].Id == 1 or df.loc[i].Id == -1):
+            lane_id = df.loc[i].laneId
+            #print(lane_id)
+            
+    center_lane_index = search_indexes(lane_id, lane_properties, 'Id')
+    #print(road_id,center_lane_index)
+    
+    if len(center_lane_index)==0:
+        #print(100000001)
+        origin.append('41.14439747035695')
+        origin.append('24.917625121565892')
+        origin.append('0.0')
+        return(origin)
+    else:
+        for i in indexes:
+        #print(road_id,1)
+            if(df.loc[i].Id == 1):
+                #print(road_id,1)
+                center_id = lane_properties.loc[center_lane_index[0]].RightBoundaryId
+                
+                origin_index = search_indexes(center_id, coordinates, 'Id')
+                origin.append(coordinates.loc[origin_index[0]].y)
+                origin.append(coordinates.loc[origin_index[0]].x)
+                origin.append(str(0.0))
+                return(origin)
+            if(df.loc[i].Id == -1):
+                
+                center_id = lane_properties.loc[center_lane_index[0]].LeftBoundaryID
+                if len(center_id)==0:
+                    print(1000001)
+                else:
+                    origin_index = search_indexes(center_id, coordinates, 'Id')
+                    origin.append(coordinates.loc[origin_index[0]].y)
+                    origin.append(coordinates.loc[origin_index[0]].x)
+                    origin.append(str(0.0))
+                    return(origin)
+            
+def set_id(road_id, lane_id, type): 
+    # id3 is 0 for lane id 
+    # for other types will set the id3 to other numbers
+    id0 = road_id
+    id1 = abs(lane_id)
+    if(lane_id>0):
+        id2 = 0
+    else:
+        id2 = 1
+    if(type == "lane"):
+        id3 = 0
+    if(type == "lanedivider"):
+        id3 = random.randint(0,100)
+    return id0, id1, id2, id3
+
+
+def num_lanes(road_id, df): #travarsability 
+    index = search_indexes(road_id, df, 'Road Id')
+    if len(index) ==0:
+        return (0)
+    else:
+        
+        s = df['rightBoundary'].loc[index.item(0)]
+        e = df['leftBoundary'].loc[index.item(0)]
+        num = abs(s - e)
+        return(num)
+
+def get_lanes(road_id, df_left, df_right): 
+    road_lanes = pd.DataFrame(columns=['Road Id', 'Id', 'type', 'roadmark type', 'roadmark material', 
+                                    'roadmark color', 'roadmark laneChange', 'max speed', 'speed unit',
+                                    'laneId', 'travelDir'])
+    lefts = search_indexes(road_id, df_left, 'Road Id')
+    rights = search_indexes(road_id, df_right, 'Road Id')
+    #print(lefts,rights)
+    for l in lefts:
+        d = df_left.loc[l].to_frame().transpose()
+        
+        road_lanes = pd.concat([road_lanes, d], axis=0, ignore_index=True)
+    
+    for r in rights:
+        d = df_right.loc[r].to_frame().transpose()
+        
+        road_lanes = pd.concat([road_lanes, d], axis=0, ignore_index=True)
+    #print(road_lanes)
+    return(road_lanes)
+    
+def get_dividers(op_lane_id, df):
+    dividers = []
+    # to df einai to lane_properties
+    for o in op_lane_id:
+        #print(o)
+        index = search_indexes(o, df, 'Id')
+        lane_boundary = df['LeftBoundaryID'].loc[index].values
+        if len(lane_boundary)==0:
+            return None #ME RETURN NONE GURNAEI NONE ALLIWS VAZEI TIMH???
+        else:
+            if(not(lane_boundary[0] in dividers)):
+                dividers.append(lane_boundary[0])               
+            lane_boundary = df['RightBoundaryId'].loc[index].values
+            if len(lane_boundary)==0:
+                return None
+            else:
+                if(not(lane_boundary[0] in dividers)):
+                    dividers.append(lane_boundary[0]) 
+        return(dividers)
+        
+def save_ids(df, op_id, id0, id1, id2, id3):
+    m = [op_id, id0, id1, id2, id3]
+    m_df = pd.DataFrame(m)
+    m_df = m_df.transpose()
+    m_df.columns = ['laneId', 'id0', 'id1', 'id2', 'id3']
+    df = pd.concat([df, m_df], axis=0, ignore_index=True) #krataei t proigoumena kathe fora kai vazei t kainouria
+    return(df)   
+    
+def get_color(df_lanes,index,dividers):
+    for index in len(dividers):
+        if(df_lanes['roadmark color'] == "white"):
+            return(4)   
+ 
+def get_geopoints(lane_id, coords):
+    d = coords.loc[coords['Id'] == lane_id]
+    d.reset_index(drop=True, inplace=True)
+    return (d)
+    
+def get_speed_limit(index, df):
+    speed = df['max speed'].loc[index]
+    return(speed) 
+   
+    
+def get_lane_type(index, df):
+    t = df['type'].loc[index]
+    if(t == "shoulder"):
+        return(1)
+    if(t == "driving"):
+        return(0)    
+        
+def get_lane_driving_dir(index, df):
+    driving_dir = df['travelDir'].loc[index]
+    if(driving_dir == "undirected"):
+        return(3)
+    if(driving_dir == "forward"):
+        return(0)
+    if(driving_dir == "backward"):
+        return(1)
+ 
+ def get_lane_driving_dir2(driving_dir):
+    #driving_dir = df['travelDir'].loc[index]
+    if(driving_dir) == ('undirected' or 'Undirected'):
+        #print(type(driving_dir))
+        return(3)
+    if(driving_dir) == ('forward' or 'Forward'):
+        #print(driving_dir)
+        return(0)
+    if(driving_dir) == ('backward' or 'Backward'):
+        #print(driving_dir)
+        return(1)
+        
+def find_boundary_id(lane_id, df, df_id, lr): #(op_lane, lane_properties, border_with_id, 'left')
+    id = []                                   #vriskoume tin kentrikh grammh se poio index uparxei sto lane_properties
+    ind = ''                                  #vriskoume apo to lane_properties to right i left boundary tis = divider
+                                              #vriskoume apo to border_with_id to id tou divider
+    i = search_indexes(lane_id, df, 'Id')
+    if lr == "right":
+        ind = df['RightBoundaryId'].loc[i]
+    if lr == "left":
+        ind = df["LeftBoundaryID"].loc[i]
+    if len(ind)==0:
+        return None
+    else:
+        ind_id = search_indexes(ind.values[0], df_id, 'laneId')
+        #print(df_id.loc[ind_id])
+        if len(ind_id) == 0:
+            return None
+        else:
+            id.append(df_id['id0'].loc[ind_id.item(0)])
+            id.append(df_id['id1'].loc[ind_id.item(0)])
+            id.append(df_id['id2'].loc[ind_id.item(0)])
+            id.append(df_id['id3'].loc[ind_id.item(0)])
+            return(id)   
+            
+def same_direction(lane_direction, other):
+    if(lane_direction ==  other):
+      return(1)
+    else:
+      return(0) 
+      
+def connection_road2(road_id,connection_type,successors,predecessors,left_lanes,right_lanes,lane_properties,coordinates,junction):
+    element_type=''
+    element_id = 0
+    next_con = []
+    prev_con = []
+    if (connection_type == 'nextr'):
+        index = search_indexes(road_id, successors, 'Road Id')
+        index1 = search_indexes(road_id, predecessors, 'elementId')
+        if len(index)==0:
+            if len(index1)==0:
+                return None
+            else:
+                for l in index1:
+                    element_type1 = predecessors['elementType'].loc[l.item(0)]
+                    origin = road_origin(predecessors['Road Id'].loc[l.item(0)], left_lanes, right_lanes, lane_properties, coordinates)
+                   
+                    if(element_type1 == 'road' and [origin,str(predecessors['Road Id'].loc[l.item(0)])] not in next_con):
+                        next_con.append([origin, str(predecessors['Road Id'].loc[l.item(0)])])
+                return(element_type1,prev_con)        
+        else:
+            element_type = successors['elementType'].loc[index.item(0)]
+            element_id = successors['elementId'].loc[index.item(0)]
+            if element_type == 'road':
+                origin = road_origin(element_id, left_lanes, right_lanes, lane_properties, coordinates)
+                if(element_type == 'road' and [origin,str(element_id)] not in next_con):
+                    next_con.append([origin, str(element_id)])
+        
+           
+            if(element_type == 'junction'):
+                for j in junctions:
+                    if(j[0] == str(element_id)):
+                        for k in j[2]:
+                            if(k[1] == str(road_id)):
+                                ri = k[2]
+                                origin = road_origin(int(ri), left_lanes, right_lanes, lane_properties, coordinates)
+                                next_con.append([origin, str(ri)])
+                               
+                               #next_con.append([road_id, ri])
+        for l in index1:
+            element_type1 = predecessors['elementType'].loc[l.item(0)]
+            origin = road_origin(predecessors['Road Id'].loc[l.item(0)], left_lanes, right_lanes, lane_properties, coordinates)
+        
+            if(element_type1 == 'road' and [origin,str(predecessors['Road Id'].loc[l.item(0)])] not in next_con):
+                next_con.append([origin, str(predecessors['Road Id'].loc[l.item(0)])])
+        return(element_type,next_con)
+#
+    if (connection_type == 'prev'):
+        indexx = search_indexes(road_id, predecessors, 'Road Id')
+        indexx1 = search_indexes(road_id, successors, 'elementId')
+        if len(indexx)==0:
+            if len(indexx1)==0:
+                
+                return None
+            else:
+                for l in indexx1:
+                    element_type1 = successors['elementType'].loc[l.item(0)]
+                    origin = road_origin(successors['Road Id'].loc[l.item(0)], left_lanes, right_lanes, lane_properties, coordinates)
+                
+                    if(element_type1 == 'road' and [origin,str(successors['Road Id'].loc[l.item(0)])] not in prev_con):
+                        prev_con.append([origin, str(successors['Road Id'].loc[l.item(0)])])
+                return(element_type1,prev_con)    
+        else:
+            element_type = predecessors['elementType'].loc[indexx.item(0)]
+            element_id = predecessors['elementId'].loc[indexx.item(0)]
+        #print(element_type)
+            if(element_type == 'road'):
+                origin = road_origin(element_id, left_lanes, right_lanes, lane_properties, coordinates)
+                if(element_type == 'road' and [origin,str(element_id)] not in prev_con):
+                    prev_con.append([origin, str(element_id)])
+            #prev_con.append([road_id,element_id])
+            #print(connections)
+            if(element_type == 'junction'):
+              
+                for j in junctions:
+                    if(j[0] == str(element_id)):
+                    
+                        for k in j[2]:
+                            if(k[1] == str(road_id)):
+                                ri = k[2]
+                                origin = road_origin(int(ri), left_lanes, right_lanes, lane_properties, coordinates)
+                                prev_con.append([origin, ri])
+                            #prev_con.append([road_id, ri])
+                            #print(connections)
+      
+        for l in indexx1:
+            element_type1 = successors['elementType'].loc[l.item(0)]
+            origin = road_origin(successors['Road Id'].loc[l.item(0)], left_lanes, right_lanes, lane_properties, coordinates)
+        
+            if(element_type1 == 'road' and [origin,str(successors['Road Id'].loc[l.item(0)])] not in prev_con):
+                prev_con.append([origin, str(successors['Road Id'].loc[l.item(0)])])    
+                #return(element_type1,prev_con)
+    return(element_type,prev_con)
+           
+def connection_lanes2(road_id,connection_type,successors,predecessors,successorsLanes,predecessorsLanes,left_lanes,right_lanes,junction,lane_properties):
+    element_type=''
+    element_id = 0
+    next_con = []
+    prev_con = []
+    
+    if (connection_type == 'next'):
+        index = search_indexes(road_id, successors, 'Road Id')
+        index1 = search_indexes(road_id, predecessors, 'elementId')
+        if len(index)==0:
+            
+            for l in index1:
+                #print(predecessors['Road Id'].loc[index1.item(0)])
+                element_type1 = predecessors['elementType'].loc[l.item(0)]
+                if(element_type1 == 'road'): #AN EMFANISTEI 2PLO
+                    indexx1 = search_indexes(predecessors['Road Id'].loc[l.item(0)], predecessorsLanes, 'RoadId')
+                    if len(indexx1) == 0:
+                        return None
+                    else:
+                    #print(indexx1)
+                        indexxx1 = search_indexes(predecessors['Road Id'].loc[l.item(0)], left_lanes, 'Road Id')
+                        if len(indexxx1)==0:
+                            #print(indexxx1,road_id)
+                            indexxxx1 = search_indexes(predecessors['Road Id'].loc[l.item(0)], right_lanes, 'Road Id')
+                            #print(indexxxx1)
+                            for b in indexxxx1:
+                                if (right_lanes['Id'][b] == predecessorsLanes['IdOfPredecessorLane'].loc[indexx1.item(0)]): 
+                                    op_lane = right_lanes['laneId'][b]
+                                    index4 = search_indexes(op_lane,lane_properties,'Id')
+                                    next_direction = lane_properties['SuccessorDir'].loc[index4.item(0)]
+                                    if ([next_direction,road_id,right_lanes['Id'].loc[b.item(0)],right_lanes['travelDir'].loc[b.item(0)]]not in next_con):
+                                        next_con.append([next_direction,road_id,right_lanes['Id'].loc[b.item(0)],right_lanes['travelDir'].loc[b.item(0)]])
+                        else:
+                            for b in indexxx1:
+                                if (left_lanes['Id'][b] == predecessorsLanes['IdOfPredecessorLane'].loc[indexx1.item(0)]): 
+                                    op_lane = left_lanes['laneId'][b]
+                                    index4 = search_indexes(op_lane,lane_properties,'Id')
+                                    next_direction = lane_properties['SuccessorDir'].loc[index4.item(0)]
+                                    if ([next_direction, road_id,left_lanes['Id'].loc[b.item(0)],left_lanes['travelDir'].loc[b.item(0)]]not in next_con):
+                                        next_con.append([next_direction,road_id,left_lanes['Id'].loc[b.item(0)],left_lanes['travelDir'].loc[b.item(0)]])
+        else:
+            
+            element_type = successors['elementType'].loc[index.item(0)]
+            element_id = successors['elementId'].loc[index.item(0)]
+            #print(element_type)
+            if(element_type == 'road'):
+                #print(1)
+                indexx = search_indexes(successors['Road Id'].loc[index.item(0)],successorsLanes, 'RoadId')
+                if len(indexx)==0:
+                    return None
+                    #print(1)
+                else:
+                    #print(2)
+                    #print(indexx)
+#An aristera den uparxei to road_id->des deksia
+#an den uparxei oute deksia->return None
+#An uparxei deksia parto apo deksia
+#An uparxei aristera psakse aristera, an den einai to swsto parto apo deksia                   
+                    indexxx = search_indexes(successors['Road Id'].loc[index.item(0)],left_lanes, 'Road Id')
+                    indexxxx = search_indexes(successors['Road Id'].loc[index.item(0)],right_lanes, 'Road Id')
+                    if len(indexxx)==0:
+                        if len(indexxxx)==0:
+                            return None
+                        else:
+                            for a in indexxxx:
+                                for t in range(len(indexx)):
+                                    if right_lanes['Id'][a] == successorsLanes['IdOfSuccessorLane'].loc[indexx[t]]:
+                                        op_lane = right_lanes['laneId'][a]
+                                        index4 = search_indexes(op_lane,lane_properties,'Id')
+                                        next_direction = lane_properties['SuccessorDir'].loc[index4.item(0)]
+                                        if ([next_direction,right_lanes['Road Id'].loc[a.item(0)],right_lanes['Id'].loc[a.item(0)],right_lanes['travelDir'].loc[a.item(0)]]not in next_con):
+                                            next_con.append([next_direction,right_lanes['Road Id'].loc[a.item(0)],right_lanes['Id'].loc[a.item(0)],right_lanes['travelDir'].loc[a.item(0)]])
+                    else:
+                        #print(4)
+                        for a in indexxx:
+                            for t in range(len(indexx)):
+                                if left_lanes['Id'][a] == successorsLanes['IdOfSuccessorLane'].loc[indexx.item(t)]:
+                                    #print(101)
+                                    op_lane = left_lanes['laneId'][a]
+                                    index4 = search_indexes(op_lane,lane_properties,'Id')
+                                    next_direction = lane_properties['SuccessorDir'].loc[index4.item(0)]
+                                    if ([next_direction,left_lanes['Road Id'].loc[a.item(0)],left_lanes['Id'].loc[a.item(0)],left_lanes['travelDir'].loc[a.item(0)]]not in next_con):
+                                        next_con.append([next_direction,left_lanes['Road Id'].loc[a.item(0)],left_lanes['Id'].loc[a.item(0)],left_lanes['travelDir'].loc[a.item(0)]])
+                                else:
+                                    for a in indexxxx:
+                                        for t in range(len(indexx)):
+                                        #print(100)
+                                            if right_lanes['Id'][a] == successorsLanes['IdOfSuccessorLane'].loc[indexx.item(t)]:
+                                                op_lane = right_lanes['laneId'][a]
+                                                index4 = search_indexes(op_lane,lane_properties,'Id')
+                                                next_direction = lane_properties['SuccessorDir'].loc[index4.item(0)]
+                                                if ([next_direction,right_lanes['Road Id'].loc[a.item(0)],right_lanes['Id'].loc[a.item(0)],right_lanes['travelDir'].loc[a.item(0)]]not in next_con):
+                                                    next_con.append([next_direction,right_lanes['Road Id'].loc[a.item(0)],right_lanes['Id'].loc[a.item(0)],right_lanes['travelDir'].loc[a.item(0)]])
+                        for a in indexxxx:
+                            for t in range(len(indexx)):
+                                   #print(100)
+                                if right_lanes['Id'][a] == successorsLanes['IdOfSuccessorLane'].loc[indexx.item(t)]:
+                                    op_lane = right_lanes['laneId'][a]
+                                    index4 = search_indexes(op_lane,lane_properties,'Id')
+                                    next_direction = lane_properties['SuccessorDir'].loc[index4.item(0)]
+                                    if ([next_direction,right_lanes['Road Id'].loc[a.item(0)],right_lanes['Id'].loc[a.item(0)],right_lanes['travelDir'].loc[a.item(0)]]not in next_con):
+                                        next_con.append([next_direction,right_lanes['Road Id'].loc[a.item(0)],right_lanes['Id'].loc[a.item(0)],right_lanes['travelDir'].loc[a.item(0)]])   
+            if(element_type == 'junction'):
+                for j in junctions:
+                    if(j[0] == str(element_id)):
+                        for k in j[2]:
+                            if(k[1] == str(road_id)):
+                                ri = k[4]
+                                #print(k[1],k[4])
+                                next_road = k[2]
+                                #print(ri)
+                                index2 = search_indexes(road_id,left_lanes,'Road Id')
+                                indexx2 = search_indexes(road_id,right_lanes,'Road Id')
+#An aristera den uparxei to road_id->des deksia
+#an den uparxei oute deksia->return None
+#An uparxei deksia parto apo deksia
+#An uparxei aristera psakse aristera, an den einai to swsto parto apo deksia
+                                if len(index2)==0: 
+                                    if len(indexx2)==0:
+                                        return None
+                                    else:
+                                        for c in indexx2:
+                                            #print(str(right_lanes['Id'][c]))
+                                            #print(ri)
+                                            #if ri in range(right_lanes['Id'][c]):
+                                            #if str(right_lanes['Id'][c]) in range(len(ri)):
+                                            for d in ri:
+                                                #print(d)
+                                                if((str(right_lanes['Id'][c])) in d):
+                                                    op_lane = right_lanes['laneId'][c]
+                                                    index4 = search_indexes(op_lane,lane_properties,'Id')
+                                                    next_direction = lane_properties['SuccessorDir'].loc[index4.item(0)]
+                                                    if ([next_direction,right_lanes['Road Id'].loc[c.item(0)],right_lanes['Id'].loc[c.item(0)],right_lanes['travelDir'].loc[c.item(0)]]not in next_con):
+                                                        next_con.append([next_direction,right_lanes['Road Id'].loc[c.item(0)],right_lanes['Id'].loc[c.item(0)],right_lanes['travelDir'].loc[c.item(0)]])
+                                else:       
+                                #print(index2)
+                                    for c in index2:
+                                        #print(str(left_lanes['Id'][c]))
+                                        #print(ri)
+                                        #print(len(ri))
+                                        #if ri in range(left_lanes['Id'][c]):
+                                        #if str(left_lanes['Id'][c]) in range(len(ri)):
+                                        for d in ri:
+                                            #print(d)
+                                            #print(str(left_lanes['Id'][c]))
+                                            #print(type(d))
+                                            if(str(left_lanes['Id'][c])) in d: 
+                                                #print(1)
+                                                op_lane = left_lanes['laneId'][c]
+                                                index4 = search_indexes(op_lane,lane_properties,'Id')
+                                                next_direction = lane_properties['SuccessorDir'].loc[index4.item(0)]
+                                                if ([next_direction,left_lanes['Road Id'].loc[c.item(0)],left_lanes['Id'].loc[c.item(0)],left_lanes['travelDir'].loc[c.item(0)]]not in next_con):
+                                                    next_con.append([next_direction, left_lanes['Road Id'].loc[c.item(0)],left_lanes['Id'].loc[c.item(0)],left_lanes['travelDir'].loc[c.item(0)]])
+                                            else:
+                                                indexx2 = search_indexes(road_id,right_lanes,'Road Id')
+                                                for c in indexx2:
+                                                    #print(str(right_lanes['Id'][c]))
+                                                    #print(ri)
+                                                    #if ri in range(right_lanes['Id'][c]):
+                                                    #if str(right_lanes['Id'][c]) in range(len(ri)):
+                                                    for d in ri:
+                                                        #print(d)
+                                                        if((str(right_lanes['Id'][c])) in d):
+                                                            op_lane = right_lanes['laneId'][c]
+                                                            index4 = search_indexes(op_lane,lane_properties,'Id')
+                                                            next_direction = lane_properties['SuccessorDir'].loc[index4.item(0)]
+                                                            if ([next_direction,right_lanes['Road Id'].loc[c.item(0)],right_lanes['Id'].loc[c.item(0)],right_lanes['travelDir'].loc[c.item(0)]]not in next_con):
+                                                                next_con.append([next_direction,right_lanes['Road Id'].loc[c.item(0)],right_lanes['Id'].loc[c.item(0)],right_lanes['travelDir'].loc[c.item(0)]])
+                                            if((str(right_lanes['Id'][c])) in d):
+                                                op_lane = right_lanes['laneId'][c]
+                                                index4 = search_indexes(op_lane,lane_properties,'Id')
+                                                next_direction = lane_properties['SuccessorDir'].loc[index4.item(0)]
+                                                if ([next_direction,right_lanes['Road Id'].loc[c.item(0)],right_lanes['Id'].loc[c.item(0)],right_lanes['travelDir'].loc[c.item(0)]]not in next_con):
+                                                    next_con.append([next_direction,right_lanes['Road Id'].loc[c.item(0)],right_lanes['Id'].loc[c.item(0)],right_lanes['travelDir'].loc[c.item(0)]])
+        #for l in index1:
+        #    #print(predecessors['Road Id'].loc[index1.item(0)])
+        #    element_type1 = predecessors['elementType'].loc[l.item(0)]
+        #    if(element_type1 == 'road'): #AN EMFANISTEI 2PLO
+        #        indexx1 = search_indexes(predecessors['Road Id'].loc[l.item(0)], predecessorsLanes, 'RoadId')
+        #        if len(indexx1) != 0:
+        #            
+        #        
+        #        #print(indexx1)
+        #            indexxx1 = search_indexes(predecessors['Road Id'].loc[l.item(0)], left_lanes, 'Road Id')
+        #            if len(indexxx1)==0:
+        #                #print(indexxx1,road_id)
+        #                indexxxx1 = search_indexes(predecessors['Road Id'].loc[l.item(0)], right_lanes, 'Road Id')
+        #                #print(indexxxx1)
+        #                for b in indexxxx1:
+        #                    if (right_lanes['Id'][b] == predecessorsLanes['IdOfPredecessorLane'].loc[indexx1.item(0)]): 
+        #                        op_lane = right_lanes['laneId'][b]
+        #                        index4 = search_indexes(op_lane,lane_properties,'Id')
+        #                        next_direction = lane_properties['SuccessorDir'].loc[index4.item(0)]
+        #                        if ([next_direction,road_id,right_lanes['Id'].loc[b.item(0)],right_lanes['travelDir'].loc[b.item(0)]]not in next_con):
+        #                            next_con.append([next_direction,road_id,right_lanes['Id'].loc[b.item(0)],right_lanes['travelDir'].loc[b.item(0)]])
+        #            else:
+        #                for b in indexxx1:
+        #                    if (left_lanes['Id'][b] == predecessorsLanes['IdOfPredecessorLane'].loc[indexx1.item(0)]): 
+        #                        op_lane = left_lanes['laneId'][b]
+        #                        index4 = search_indexes(op_lane,lane_properties,'Id')
+        #                        next_direction = lane_properties['SuccessorDir'].loc[index4.item(0)]
+        #                        if ([next_direction, road_id,left_lanes['Id'].loc[b.item(0)],left_lanes['travelDir'].loc[b.item(0)]]not in next_con):
+        #                            next_con.append([next_direction,road_id,left_lanes['Id'].loc[b.item(0)],left_lanes['travelDir'].loc[b.item(0)]])
+        return(next_con)                               
+                                
+    
+           
+           
+        
+
+    if (connection_type == 'prev'):
+        index = search_indexes(road_id, predecessors, 'Road Id')
+        index1 = search_indexes(road_id, successors, 'elementId')
+        if len(index)==0:
+            for l in index1:
+                #print(predecessors['Road Id'].loc[index1.item(0)])
+                element_type = successors['elementType'].loc[l.item(0)]
+                if(element_type == 'road'): #AN EMFANISTEI 2PLO
+                    indexx1 = search_indexes(successors['Road Id'].loc[l.item(0)], successorsLanes, 'RoadId')
+                    if len(indexx1)==0:
+                        return None
+                    else:
+                        #print(indexx1)
+                        indexxx1 = search_indexes(successors['Road Id'].loc[l.item(0)], left_lanes, 'Road Id')
+                        if len(indexxx1)==0:
+                            #print(indexxx1,road_id)
+                            indexxxx1 = search_indexes(successors['Road Id'].loc[l.item(0)], right_lanes, 'Road Id')
+                            #print(indexxxx1)
+                            for b in indexxxx1:
+                                if (right_lanes['Id'][b] == successorsLanes['IdOfSuccessorLane'].loc[indexx1.item(0)]): 
+                                    op_lane = right_lanes['laneId'][b]
+                                    index5 = search_indexes(op_lane,lane_properties,'Id')
+                                    prev_direction = lane_properties['PredecessorDir'].loc[index5.item(0)]
+                                    if([prev_direction,str(road_id),right_lanes['Id'].loc[b.item(0)],right_lanes['travelDir'].loc[b.item(0)]]not in prev_con):
+                                        prev_con.append([prev_direction,road_id,right_lanes['Id'].loc[b.item(0)],right_lanes['travelDir'].loc[b.item(0)]])
+                        else:
+                            for b in indexxx1:
+                                if (left_lanes['Id'][b] == successorsLanes['IdOfSuccessorLane'].loc[indexx1.item(0)]):
+                                    op_lane = left_lanes['laneId'][b]
+                                    index5 = search_indexes(op_lane,lane_properties,'Id')
+                                    prev_direction = lane_properties['PredecessorDir'].loc[index5.item(0)]
+                                    
+                                    if([prev_direction,str(road_id),left_lanes['Id'].loc[b.item(0)],left_lanes['travelDir'].loc[b.item(0)]]not in prev_con):
+                                        prev_con.append([prev_direction,road_id,left_lanes['Id'].loc[b.item(0)],left_lanes['travelDir'].loc[b.item(0)]])
+        else:
+            element_type = predecessors['elementType'].loc[index.item(0)]
+            element_id = predecessors['elementId'].loc[index.item(0)]
+            #print(element_type)
+            if(element_type == 'road'):
+                #print(1)
+                indexx = search_indexes(predecessors['Road Id'].loc[index.item(0)],predecessorsLanes, 'RoadId')
+                if len(indexx)==0:
+                    return None
+                    #print(1)
+                else:
+                    #print(2)
+                    #print(indexx)
+#An aristera den uparxei to road_id->des deksia
+#an den uparxei oute deksia->return None
+#An uparxei deksia parto apo deksia
+#An uparxei aristera psakse aristera, an den einai to swsto parto apo deksia                   
+                    indexxx = search_indexes(predecessors['Road Id'].loc[index.item(0)],left_lanes, 'Road Id')
+                    indexxxx = search_indexes(predecessors['Road Id'].loc[index.item(0)],right_lanes, 'Road Id')
+                    if len(indexxx)==0:
+                        if len(indexxxx)==0:
+                            return None
+                        else:
+                            for a in indexxxx:
+                                for t in range(len(indexx)):
+                                    if right_lanes['Id'][a] == predecessorsLanes['IdOfPredecessorLane'].loc[indexx[t]]:
+                                        op_lane = right_lanes['laneId'][a]
+                                        index4 = search_indexes(op_lane,lane_properties,'Id')
+                                        prev_direction = lane_properties['PredecessorDir'].loc[index4.item(0)]
+                                        if ([prev_direction,right_lanes['Road Id'].loc[a.item(0)],right_lanes['Id'].loc[a.item(0)],right_lanes['travelDir'].loc[a.item(0)]]not in prev_con):
+                                            prev_con.append([prev_direction,right_lanes['Road Id'].loc[a.item(0)],right_lanes['Id'].loc[a.item(0)],right_lanes['travelDir'].loc[a.item(0)]])
+                    else:
+                        #print(4)
+                        for a in indexxx:
+                            for t in range(len(indexx)):
+                                if left_lanes['Id'][a] == predecessorsLanes['IdOfPredecessorLane'].loc[indexx.item(t)]:
+                                    #print(101)
+                                    op_lane = left_lanes['laneId'][a]
+                                    index4 = search_indexes(op_lane,lane_properties,'Id')
+                                    prev_direction = lane_properties['PredecessorDir'].loc[index4.item(0)]
+                                    if ([prev_direction,left_lanes['Road Id'].loc[a.item(0)],left_lanes['Id'].loc[a.item(0)],left_lanes['travelDir'].loc[a.item(0)]]not in prev_con):
+                                        prev_con.append([prev_direction,left_lanes['Road Id'].loc[a.item(0)],left_lanes['Id'].loc[a.item(0)],left_lanes['travelDir'].loc[a.item(0)]])
+                                else:
+                                    for a in indexxxx:
+                                        for t in range(len(indexx)):
+                                        #print(100)
+                                            if right_lanes['Id'][a] == predecessorsLanes['IdOfPredecessorLane'].loc[indexx.item(t)]:
+                                                op_lane = right_lanes['laneId'][a]
+                                                index4 = search_indexes(op_lane,lane_properties,'Id')
+                                                prev_direction = lane_properties['PredecessorDir'].loc[index4.item(0)]
+                                                if ([prev_direction,right_lanes['Road Id'].loc[a.item(0)],right_lanes['Id'].loc[a.item(0)],right_lanes['travelDir'].loc[a.item(0)]]not in prev_con):
+                                                    prev_con.append([prev_direction,right_lanes['Road Id'].loc[a.item(0)],right_lanes['Id'].loc[a.item(0)],right_lanes['travelDir'].loc[a.item(0)]])
+                        for a in indexxxx:
+                            for t in range(len(indexx)):
+                                   #print(100)
+                                if right_lanes['Id'][a] == predecessorsLanes['IdOfPredecessorLane'].loc[indexx.item(t)]:
+                                    op_lane = right_lanes['laneId'][a]
+                                    index4 = search_indexes(op_lane,lane_properties,'Id')
+                                    prev_direction = lane_properties['PredecessorDir'].loc[index4.item(0)]
+                                    if ([prev_direction,right_lanes['Road Id'].loc[a.item(0)],right_lanes['Id'].loc[a.item(0)],right_lanes['travelDir'].loc[a.item(0)]]not in prev_con):
+                                        prev_con.append([prev_direction,right_lanes['Road Id'].loc[a.item(0)],right_lanes['Id'].loc[a.item(0)],right_lanes['travelDir'].loc[a.item(0)]])   
+            if(element_type == 'junction'):
+                for j in junctions:
+                    if(j[0] == str(element_id)):
+                        for k in j[2]:
+                            if(k[1] == str(road_id)):
+                                ri = k[4]
+                                #print(k[1],k[4])
+                                #next_road = k[2]
+                                #print(ri)
+                                index2 = search_indexes(road_id,left_lanes,'Road Id')
+                                indexx2 = search_indexes(road_id,right_lanes,'Road Id')
+#An aristera den uparxei to road_id->des deksia
+#an den uparxei oute deksia->return None
+#An uparxei deksia parto apo deksia
+#An uparxei aristera psakse aristera, an den einai to swsto parto apo deksia
+                                if len(index2)==0: 
+                                    if len(indexx2)==0:
+                                        return None
+                                    else:
+                                        for c in indexx2:
+                                            #print(str(right_lanes['Id'][c]))
+                                            #print(ri)
+                                            #if ri in range(right_lanes['Id'][c]):
+                                            #if str(right_lanes['Id'][c]) in range(len(ri)):
+                                            for d in ri:
+                                                #print(d)
+                                                if((str(right_lanes['Id'][c])) in d):
+                                                    op_lane = right_lanes['laneId'][c]
+                                                    index4 = search_indexes(op_lane,lane_properties,'Id')
+                                                    prev_direction = lane_properties['PredecessorDir'].loc[index4.item(0)]
+                                                    if ([prev_direction,right_lanes['Road Id'].loc[c.item(0)],right_lanes['Id'].loc[c.item(0)],right_lanes['travelDir'].loc[c.item(0)]]not in prev_con):
+                                                        prev_con.append([prev_direction,right_lanes['Road Id'].loc[c.item(0)],right_lanes['Id'].loc[c.item(0)],right_lanes['travelDir'].loc[c.item(0)]])
+                                else:       
+                                #print(index2)
+                                    for c in index2:
+                                        #print(str(left_lanes['Id'][c]))
+                                        #print(ri)
+                                        #print(len(ri))
+                                        #if ri in range(left_lanes['Id'][c]):
+                                        #if str(left_lanes['Id'][c]) in range(len(ri)):
+                                        for d in ri:
+                                            #print(d)
+                                            #print(str(left_lanes['Id'][c]))
+                                            #print(type(d))
+                                            if(str(left_lanes['Id'][c])) in d: 
+                                                #print(1)
+                                                op_lane = left_lanes['laneId'][c]
+                                                index4 = search_indexes(op_lane,lane_properties,'Id')
+                                                prev_direction = lane_properties['PredecessorDir'].loc[index4.item(0)]
+                                                if ([prev_direction,left_lanes['Road Id'].loc[c.item(0)],left_lanes['Id'].loc[c.item(0)],left_lanes['travelDir'].loc[c.item(0)]]not in prev_con):
+                                                    prev_con.append([prev_direction, left_lanes['Road Id'].loc[c.item(0)],left_lanes['Id'].loc[c.item(0)],left_lanes['travelDir'].loc[c.item(0)]])
+                                            else:
+                                                indexx2 = search_indexes(road_id,right_lanes,'Road Id')
+                                                for c in indexx2:
+                                                    #print(str(right_lanes['Id'][c]))
+                                                    #print(ri)
+                                                    #if ri in range(right_lanes['Id'][c]):
+                                                    #if str(right_lanes['Id'][c]) in range(len(ri)):
+                                                    for d in ri:
+                                                        #print(d)
+                                                        if((str(right_lanes['Id'][c])) in d):
+                                                            op_lane = right_lanes['laneId'][c]
+                                                            index4 = search_indexes(op_lane,lane_properties,'Id')
+                                                            prev_direction = lane_properties['PredecessorDir'].loc[index4.item(0)]
+                                                            if ([prev_direction,right_lanes['Road Id'].loc[c.item(0)],right_lanes['Id'].loc[c.item(0)],right_lanes['travelDir'].loc[c.item(0)]]not in prev_con):
+                                                                prev_con.append([prev_direction,right_lanes['Road Id'].loc[c.item(0)],right_lanes['Id'].loc[c.item(0)],right_lanes['travelDir'].loc[c.item(0)]])
+                                            if((str(right_lanes['Id'][c])) in d):
+                                                op_lane = right_lanes['laneId'][c]
+                                                index4 = search_indexes(op_lane,lane_properties,'Id')
+                                                prev_direction = lane_properties['PredecessorDir'].loc[index4.item(0)]
+                                                if ([prev_direction,right_lanes['Road Id'].loc[c.item(0)],right_lanes['Id'].loc[c.item(0)],right_lanes['travelDir'].loc[c.item(0)]]not in prev_con):
+                                                    prev_con.append([prev_direction,right_lanes['Road Id'].loc[c.item(0)],right_lanes['Id'].loc[c.item(0)],right_lanes['travelDir'].loc[c.item(0)]])
+            return(prev_con)
+    
+def objxy(road_id):
+    objects1 = pd.DataFrame(columns=['Road Id', 'id', 'name', 's', 't', 'zOffset', 'hdg', 'roll',
+                                        'pitch', 'orientation', 'type', 'height', 'width', 'length'])
+    geo1 = pd.DataFrame(columns=['Road Id', 's', 'x', 'hdg', 'length'])
+    x = []
+   
+    objects1 = pd.DataFrame()
+    geo1 = pd.DataFrame()
+    indexes1 = search_indexes(road_id,objects,'Road id')
+    if len(indexes1)==0:
+        indexes2 = []
+    for i2 in indexes1:
+        indexes2 = search_indexes(objects.iloc[i2]['Road id'] ,geo,'Road Id')
+    #print(indexes1,indexes2)
+    for i1 in indexes1:
+        d = objects.loc[i1].to_frame().transpose()
+        objects1 = pd.concat([objects1, d], axis=0, ignore_index=True)
+    for i3 in indexes2:
+        d1 = geo.loc[i3].to_frame().transpose()
+        geo1 = pd.concat([geo1, d1], axis=0, ignore_index=True)
+       
+    for index1,row1 in objects1.iterrows():
+        #print(1)
+        temp = 0
+        if(len(geo1)==1):
+            temp = 1
+            xa = geo1.iloc[0]['x'] + (objects1.iloc[index1]['s'] - geo1.iloc[0]['s'])* (math.cos(geo1.iloc[0]['hdg']))
+            ya = geo1.iloc[0]['y'] + (objects1.iloc[index1]['s'] - geo1.iloc[0]['s'])* (math.cos(geo1.iloc[0]['hdg']))
+            xf = xa +(objects1.iloc[index1]['t']*math.sin(objects1.iloc[index1]['hdg']))
+            yf = ya +(objects1.iloc[index1]['t']*math.cos(objects1.iloc[index1]['hdg']))
+            x.append([[xf,yf,0]])
+            
+            #print(i,index1,index2-1,xa)
+        for index2 in range(1,len(geo1)):
+            #print(i,len(geo1))
+            if (objects1.iloc[index1]['s'] > geo1.iloc[index2-1]['s'] and objects1.iloc[index1]['s'] < geo1.iloc[index2]['s'] and temp==0):
+                a = (road_origin(road_id, left_lanes, right_lanes, lane_properties, coordinates))
+                #print(a[0])
+                temp = 2
+                xa = geo1.iloc[index2-1]['x'] + (objects1.iloc[index1]['s'] - geo1.iloc[index2-1]['s'])*(math.cos(geo1.iloc[index2-1]['hdg']))
+                ya = geo1.iloc[index2-1]['y'] + (objects1.iloc[index1]['s'] - geo1.iloc[index2-1]['s'])*(math.cos(geo1.iloc[index2-1]['hdg']))
+                xf = xa +(objects1.iloc[index1]['t']*math.sin(objects1.iloc[index1]['hdg']))
+                yf = ya +(objects1.iloc[index1]['t']*math.cos(objects1.iloc[index1]['hdg']))
+                x.append([[xf,yf,0]])
+                
+                #print(index1,index2-1)
+        if (temp == 0):
+            #print(road_id,index1,index2)
+            xa = geo1.iloc[index2-1]['x'] + (objects1.iloc[index1]['s'] - geo1.iloc[index2-1]['s'])*(math.cos(geo1.iloc[index2-1]['hdg']))
+            ya = geo1.iloc[index2-1]['y'] + (objects1.iloc[index1]['s'] - geo1.iloc[index2-1]['s'])*(math.cos(geo1.iloc[index2-1]['hdg']))
+            xf = xa +(objects1.iloc[index1]['t']*math.sin(objects1.iloc[index1]['hdg']))
+            yf = ya +(objects1.iloc[index1]['t']*math.cos(objects1.iloc[index1]['hdg']))
+            x.append([[xf,yf,0]])
+            
+          
+    return(x)
+ #local tou xodr---->wgs84 ----->local tou dw
+
