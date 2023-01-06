@@ -1,8 +1,9 @@
 # xodr_to_DwMap
 ---
-This repository includes the code that translates an OpenDRIVE (xodr) HD map to DwMap HD map.
+This repository includes the code that translates an OpenDRIVE (xodr) file format to DWMap file format. These file formats are used to store data for High Definition (HD) maps.
 The xodr map (XML format) was created and exported from RoadRunner software.
-OpenDRIVE provides a xodr file and a geojson file for descriping their HD map. This repository is divided in 5 parts.
+OpenDRIVE provides a xodr file and a geojson file for descriping their HD map. These files can be found in data file.
+This repository is divided in 5 parts.
 
 # parsegeojson.py
 Parse the geojson file.
