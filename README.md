@@ -2,6 +2,19 @@
 
 ---
 
+## Installation
+
+To get started with this repository, follow the steps below to set up the environment and install the required dependencies:
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/your-username/xodr_to_DwMap.git
+   cd xodr_to_DwMap
+   conda create --name geopanda python=3.8
+   conda activate geopanda
+   pip install -r requirements.txt
+
+
 This repository contains the codebase for converting OpenDRIVE (XODR) file formats to DWMap file formats, which are utilized for storing data in High Definition (HD) maps. The XODR map (in XML format) was originally created and exported using RoadRunner software.
 
 OpenDRIVE provides both an XODR file and a GeoJSON file to describe their HD map. The process begins by converting the GeoJSON file into an XML format. The primary operations are then performed on the XML and XODR files. These files are located in the `data` directory.
