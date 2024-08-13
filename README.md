@@ -20,7 +20,7 @@ The data used in this repository were created and exported using [RoadRunner sof
 
 ---
 
-This repository contains the codebase for converting OpenDRIVE (XODR) file formats to DWMap file formats, which are utilized for storing data in High Definition (HD) maps. The XODR map (in XML format) was originally created and exported using RoadRunner software.
+This repository contains the codebase for converting OpenDRIVE (XODR) file formats to DWMap file formats, which are utilized for storing data in High Definition (HD) maps. The XODR map (in XML format) was originally created and exported using the RoadRunner software.
 
 OpenDRIVE provides both an XODR file and a GeoJSON file to describe their HD map. The process begins by converting the GeoJSON file into an XML format. The primary operations are then performed on the XML and XODR files. These files are located in the `data` directory.
 
