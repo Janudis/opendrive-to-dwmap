@@ -14,6 +14,10 @@ To get started with this repository, follow the steps below to set up the enviro
    conda activate geopanda
    pip install -r requirements.txt
 
+## Data Source
+
+The data used in this repository were created and exported using [RoadRunner software](https://www.mathworks.com/products/roadrunner.html). RoadRunner is a comprehensive tool provided by MathWorks for designing 3D scenes for simulation and testing of automated driving systems. The OpenDRIVE and GeoJSON files processed by this repository are outputs from RoadRunner.
+
 
 This repository contains the codebase for converting OpenDRIVE (XODR) file formats to DWMap file formats, which are utilized for storing data in High Definition (HD) maps. The XODR map (in XML format) was originally created and exported using RoadRunner software.
 
